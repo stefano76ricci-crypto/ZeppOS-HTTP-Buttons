@@ -1,0 +1,46 @@
+name: Build HTTP-Buttons ZeppOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Show environment
+        run: |
+          node -v
+          npm -v
+
+      - name: Install project dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Zeus CLI
+        run: npm install -g @zeppos/zeus-cli@1.9.3
+
+      - name: Check Zeus
+        run: zeus -v
+
+      - name: Build ZeppOS application
+        run: zeus build
+
+      - name: Show build output
+        run: |
+          echo "=== DIST CONTENTS ==="
+          find dist -maxdepth 3 -type f -print
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HTTP-Buttons-1.6.0-build
+          path: dist/**
+          if-no-files-found: error
