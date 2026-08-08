@@ -271,8 +271,8 @@ export const layout = {
               normal_color: button.back_color || COLOR_GRAY,
               press_color: btnPressColor(button.back_color || COLOR_GRAY, 1.3),
               click_func: () => {
-                const spinnerX = startXforThisBtn + widthOfTheButton - SPINNER_SIZE - 6
-                const spinnerY = startYforThisBtn + 6
+                const spinnerX = startXforThisBtn + (widthOfTheButton - SPINNER_SIZE) / 2
+                const spinnerY = startYforThisBtn + (heigthofthebutton - SPINNER_SIZE) / 2
                 const runRequest = (text) => {
                   // Image requests keep their spinner until the picture is shown
                   // (cleared in onReceivedFile); others stop it when the task settles.
