@@ -289,6 +289,7 @@ Page(
             this.state.data = result
             this.state.isError = false
             layout.render(this)
+            this.refreshModeButton()
             this.hideLoading()
           }
         )
@@ -301,6 +302,22 @@ Page(
           }
         )
     },
+    refreshModeButton() {
+      if (!this.modeButton || !this.modeButtonRequest) return Promise.resolve()
+      const toggleUrl = this.modeButtonRequest.url || ''
+      if (toggleUrl.indexOf('/mode/toggle') === -1) return Promise.resolve()
+      const modeUrl = toggleUrl.slice(0, -7)
+      return performRequest(this, { method: 'GET', url: modeUrl })
+        .then((res) => {
+          const body = parsedBody(res)
+          const mode = String((body && body.mode) || '').toLowerCase()
+          const text = mode === 'collo' ? '🙃 COLLO' :
+            mode === 'normale' ? '⬆ NORMALE' : null
+          if (text && this.modeButton) this.modeButton.setProperty(prop.TEXT, text)
+        })
+        .catch((e) => logger.debug('mode refresh failed', shortError(e)))
+    },
+
     showLoading() {
       logger.debug('page showLoading invoked')
       this.state.loadingText = createWidget(widget.TEXT, { ...LOADING_TEXT_WIDGET });

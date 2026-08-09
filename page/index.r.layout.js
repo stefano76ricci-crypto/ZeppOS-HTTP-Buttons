@@ -283,7 +283,16 @@ export const layout = {
                     vm.executeButtonRequest(button.request, pi, text)
                   } else {
                     const p = vm.executeButtonRequest(button.request, pi, text)
-                    if (p && p.then) { p.then(() => stopButtonSpinner(sp), () => stopButtonSpinner(sp)) }
+                    if (p && p.then) {
+                      p.then(() => {
+                        stopButtonSpinner(sp)
+                        if (button.request && typeof button.request.url === 'string' &&
+                            button.request.url.indexOf('/mode/toggle') !== -1 &&
+                            typeof vm.refreshModeButton === 'function') {
+                          vm.refreshModeButton()
+                        }
+                      }, () => stopButtonSpinner(sp))
+                    }
                     else { stopButtonSpinner(sp) }
                   }
                 }
@@ -431,6 +440,12 @@ export const layout = {
                 }
               }
             });
+
+            if (button.request && typeof button.request.url === 'string' &&
+                button.request.url.indexOf('/mode/toggle') !== -1) {
+              vm.modeButton = btn
+              vm.modeButtonRequest = button.request
+            }
           }
         };//buttons
       };//rows
