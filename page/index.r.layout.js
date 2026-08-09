@@ -539,8 +539,7 @@ export const layout = {
       });
     }
     this.refs.imageViewImg = img;
-    this.refs.imageViewBg.addEventListener(event.CLICK_DOWN, () => this.hideImage());
-    this.refs.imageViewImg.addEventListener(event.CLICK_DOWN, () => this.hideImage());
+    // Tap disabilitato: usare SELECT per tenere o BACK per scartare
   },
   notifyResult(txt, pageid, isError, type) {
     if (type == SYSTEM_TOAST) {

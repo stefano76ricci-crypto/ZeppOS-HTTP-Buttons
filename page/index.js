@@ -5,6 +5,10 @@ import { layout, LOADING_TEXT_WIDGET, LOADING_IMG_ANIM_WIDGET } from 'zosLoader:
 import { digestRequest, basicRequest, bearerRequest } from '../utils/auth-request.js'
 import { CUSTOM_TOAST, SHOW_IMAGE, DEFAULT_REQUEST_TIMEOUT_MS, MIN_REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_RPC_MARGIN_MS } from '../utils/constants.js'
 import { replace } from '@zos/router'
+import { onKey, offKey, KEY_SELECT, KEY_BACK, KEY_EVENT_CLICK } from '@zos/interaction'
+import { Vibrator, VIBRATOR_SCENE_SHORT_MIDDLE } from '@zos/sensor'
+
+// PREVIEW_KEYS_PATCH_V1
 
 const logger = getLogger('http-buttons')
 
@@ -240,6 +244,26 @@ Page(
       logger.debug('page onInit invoked')
       // Loading widgets live on this.state (created in showLoading, cleared in
       // hideLoading); nothing to set up here beyond the state defaults above.
+      this.previewDecisionBusy = false
+      this.vibrator = new Vibrator()
+
+      onKey({
+        callback: (key, keyEvent) => {
+          const previewOpen = !!(layout.refs && layout.refs.imageViewImg)
+          if (!previewOpen) return false
+
+          if (key !== KEY_SELECT && key !== KEY_BACK) return false
+
+          if (keyEvent === KEY_EVENT_CLICK) {
+            if (key === KEY_SELECT) this.keepPreview()
+            else if (key === KEY_BACK) this.discardPreview()
+          }
+
+          // Blocca il comportamento normale di SELECT/BACK
+          // finché la preview è aperta.
+          return true
+        },
+      })
     },
     build() {
       logger.debug('page build invoked')
@@ -251,6 +275,14 @@ Page(
       // aren't written yet. We must wait for the 'change'→'transferred' event
       // before reading filePath, otherwise we'd show an empty (black) file.
       if (!file) return
+
+      try {
+        if (this.vibrator) {
+          this.vibrator.start({ mode: VIBRATOR_SCENE_SHORT_MIDDLE })
+        }
+      } catch (e) {
+        logger.debug('preview vibration failed', e)
+      }
       logger.debug('image incoming', file.fileName)
       file.on('change', (event) => {
         const state = event.data.readyState
@@ -268,6 +300,55 @@ Page(
         }
       })
     },
+    keepPreview() {
+      return this.resolvePreviewDecision('keep')
+    },
+
+    discardPreview() {
+      return this.resolvePreviewDecision('discard')
+    },
+
+    resolvePreviewDecision(action) {
+      if (this.previewDecisionBusy) return Promise.resolve()
+      this.previewDecisionBusy = true
+
+      const previewBase = 'http://' + '127.0.0.1:8766'
+      const url = action === 'keep'
+        ? previewBase + '/preview/keep'
+        : previewBase + '/preview/discard'
+
+      return performRequest(this, { method: 'POST', url })
+        .then((res) => {
+          const body = parsedBody(res)
+          const status = String((body && body.status) || '')
+
+          const ok =
+            (action === 'keep' && status === 'saved') ||
+            (action === 'discard' && status === 'discarded')
+
+          if (!ok) throw new Error(status || 'preview decision failed')
+
+          layout.hideImage()
+          layout.notifyResult(
+            action === 'keep' ? 'Foto salvata' : 'Preview scartata',
+            this.pendingImagePage || 0,
+            false,
+            CUSTOM_TOAST
+          )
+        })
+        .catch((error) => {
+          layout.notifyResult(
+            'Errore: ' + shortError(error),
+            this.pendingImagePage || 0,
+            true,
+            CUSTOM_TOAST
+          )
+        })
+        .then(() => {
+          this.previewDecisionBusy = false
+        })
+    },
+
     clearImageSpinner() {
       // The button spinner for an image request is kept until the image is shown
       // or fails; it lives on the vm so this flow can dismiss it. The handle is
@@ -624,6 +705,11 @@ Page(
     },
     onDestroy() {
       logger.debug('page onDestroy invoked')
+      offKey()
+      if (this.vibrator) {
+        this.vibrator.stop()
+        this.vibrator = null
+      }
       // Stop any in-flight poll chains: clear the pending timers and flag the
       // loops so an attempt resolving after teardown doesn't reschedule.
       this.pollsCancelled = true
