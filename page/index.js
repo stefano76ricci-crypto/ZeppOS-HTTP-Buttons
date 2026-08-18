@@ -7,6 +7,7 @@ import { CUSTOM_TOAST, SHOW_IMAGE, DEFAULT_REQUEST_TIMEOUT_MS, MIN_REQUEST_TIMEO
 import { replace } from '@zos/router'
 import { onKey, offKey, KEY_SELECT, KEY_BACK, KEY_EVENT_CLICK } from '@zos/interaction'
 import { Vibrator, VIBRATOR_SCENE_SHORT_MIDDLE } from '@zos/sensor'
+import { getSwiperIndex } from '@zos/page'
 
 // PREVIEW_KEYS_PATCH_V1
 
@@ -250,18 +251,33 @@ Page(
       onKey({
         callback: (key, keyEvent) => {
           const previewOpen = !!(layout.refs && layout.refs.imageViewImg)
-          if (!previewOpen) return false
 
-          if (key !== KEY_SELECT && key !== KEY_BACK) return false
+          // La Preview ha sempre priorità:
+          // SELECT = tieni, BACK = scarta.
+          if (previewOpen) {
+            if (key !== KEY_SELECT && key !== KEY_BACK) return false
 
-          if (keyEvent === KEY_EVENT_CLICK) {
-            if (key === KEY_SELECT) this.keepPreview()
-            else if (key === KEY_BACK) this.discardPreview()
+            if (keyEvent === KEY_EVENT_CLICK) {
+              if (key === KEY_SELECT) this.keepPreview()
+              else if (key === KEY_BACK) this.discardPreview()
+            }
+
+            return true
           }
 
-          // Blocca il comportamento normale di SELECT/BACK
-          // finché la preview è aperta.
-          return true
+          // Nella pagina Memoria, SELECT legge/aggiorna i dati locali.
+          if (key === KEY_SELECT && this.storagePageIndex !== undefined) {
+            const swiperIndex = getSwiperIndex()
+            if (swiperIndex === this.storagePageIndex + 1) {
+              if (keyEvent === KEY_EVENT_CLICK &&
+                  typeof layout.showStorageInfo === 'function') {
+                layout.showStorageInfo(this.storagePageIndex)
+              }
+              return true
+            }
+          }
+
+          return false
         },
       })
     },

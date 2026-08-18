@@ -1,8 +1,11 @@
 import { px } from '@zos/utils'
 import { createWidget, deleteWidget, widget, align, prop, text_style, event, getTextLayout, anim_status} from '@zos/ui'
-import { setPageBrightTime } from '@zos/display'
+import { setPageBrightTime, getBrightness, getAutoBrightness } from '@zos/display'
 import { setScrollMode, setScrollLock, SCROLL_MODE_SWIPER } from '@zos/page'
-import { getDeviceInfo } from '@zos/device'
+import { getDeviceInfo, getDiskInfo } from '@zos/device'
+import { getPerformance, getPackageInfo } from '@zos/app'
+import { getSystemInfo, getSystemMode } from '@zos/settings'
+import { Battery } from '@zos/sensor'
 import { showToast, createModal } from '@zos/interaction'
 import { getText } from '@zos/i18n'
 import { getLogger } from '../utils/logger.js'
@@ -20,6 +23,109 @@ const NOTIFICATION_H_MIN = 40
 const NOTIFICATION_TEXT_SIZE = 32
 
 const logger = getLogger('http-buttons-layout')
+
+function formatStorageSize(bytes) {
+  const n = Number(bytes) || 0
+  if (n >= 1000000000) return (n / 1000000000).toFixed(2) + ' GB'
+  if (n >= 1000000) return Math.round(n / 1000000) + ' MB'
+  if (n >= 1000) return Math.round(n / 1000) + ' KB'
+  return Math.round(n) + ' B'
+}
+
+function getRamInfoText() {
+  const sysInfo = getSystemInfo() || {}
+  const apiLevel = parseFloat(sysInfo.minAPI || '0')
+
+  if (!isFinite(apiLevel) || apiLevel < 4) {
+    return [
+      '🧠 RAM',
+      'Non disponibile',
+      'Richiede API 4.0+',
+      'API: ' + (sysInfo.minAPI || 'n/d')
+    ].join('\n')
+  }
+
+  const profile = getPerformance('memory')
+  const memory = (profile && profile.memory) || {}
+  const system = memory.system || {}
+
+  const total = Number(system.total) || 0
+  const used = Number(system.used) || 0
+  const free = Math.max(0, total - used)
+  const usedPct = total > 0 ? Math.round((used / total) * 100) : 0
+
+  const pkg = getPackageInfo() || {}
+  const appId = Number(pkg.appId)
+
+  const apps = Array.isArray(memory.app) ? memory.app : []
+  const ownApp = apps.find((item) => Number(item.appid) === appId)
+
+  const leaks = Array.isArray(memory.leaking) ? memory.leaking : []
+  const ownLeakBytes = leaks
+    .filter((item) => Number(item.appid) === appId)
+    .reduce((sum, item) => sum + (Number(item.used) || 0), 0)
+
+  return [
+    '🧠 RAM',
+    'Sistema: ' + formatStorageSize(used) + ' / ' + formatStorageSize(total),
+    'Libera: ' + formatStorageSize(free),
+    'Uso: ' + usedPct + '%',
+    'HTTP-B: ' + (ownApp ? formatStorageSize(ownApp.used) : 'n/d'),
+    'Picco: ' + (ownApp ? formatStorageSize(ownApp.peak) : 'n/d'),
+    'Leak: ' + formatStorageSize(ownLeakBytes)
+  ].join('\n')
+}
+
+function getSystemDiagText() {
+  const info = getSystemInfo() || {}
+  const mode = getSystemMode() || {}
+  const battery = new Battery()
+  const batteryPct = battery.getCurrent()
+  const brightness = getBrightness()
+  const autoBrightness = getAutoBrightness()
+
+  const activeModes = []
+
+  if (mode.ultraPowerSaving) activeModes.push('ULTRA')
+  else if (mode.powerSaving) activeModes.push('RISPARMIO')
+
+  if (mode.DND) activeModes.push('DND')
+  if (mode.sleep) activeModes.push('SONNO')
+  if (mode.theater) activeModes.push('TEATRO')
+  if (mode.systemLock) activeModes.push('LOCK')
+  if (mode.lowTemperature) activeModes.push('BASSA T')
+
+  const modeText = activeModes.length ? activeModes.join(' ') : 'Normale'
+
+  return [
+    '⚙️ SISTEMA',
+    'Batteria: ' + batteryPct + '%',
+    'Zepp OS: ' + (info.osVersion || 'n/d'),
+    'Firmware: ' + (info.firmwareVersion || 'n/d'),
+    'API: ' + (info.minAPI || 'n/d'),
+    'Luce: ' + brightness + '% ' + (autoBrightness ? 'AUTO' : 'MAN'),
+    'Modo: ' + modeText
+  ].join('\n')
+}
+
+function getStorageInfoText() {
+  const disk = getDiskInfo()
+
+  // Memo WAV reale: PCM 16 bit, 16 kHz, mono = 256000 bit/s = 32000 byte/s
+  const seconds = Math.floor((Number(disk.free) || 0) / 32000)
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+
+  return [
+    '💾 MEMORIA',
+    'Libera: ' + formatStorageSize(disk.free),
+    'Totale: ' + formatStorageSize(disk.total),
+    'App: ' + formatStorageSize(disk.app),
+    'Quadranti: ' + formatStorageSize(disk.watchface),
+    'Sistema: ' + formatStorageSize(disk.system),
+    'Memo ≈ ' + hours + 'h ' + minutes + 'm'
+  ].join('\n')
+}
 
 // Native pixel size of the loading anim PNGs (assets .../anim/loading*.png).
 // It's the real asset size, so it is NOT scaled by px() — the anim is drawn at
@@ -101,6 +207,33 @@ function stopButtonSpinner(h) {
 
 export const layout = {
   refs: {},
+
+  showStorageInfo(pageid) {
+    try {
+      this.notifyResult(getStorageInfoText(), pageid, false, CUSTOM_TOAST, false, true)
+    } catch (e) {
+      logger.error('storage info failed', e)
+      this.notifyResult('Errore lettura memoria', pageid, true, CUSTOM_TOAST, false, true)
+    }
+  },
+
+  showRamInfo(pageid) {
+    try {
+      this.notifyResult(getRamInfoText(), pageid, false, CUSTOM_TOAST, true, true)
+    } catch (e) {
+      logger.error('RAM info failed', e)
+      this.notifyResult('Errore lettura RAM', pageid, true, CUSTOM_TOAST, true, true)
+    }
+  },
+  showSystemDiag(pageid) {
+    try {
+      this.notifyResult(getSystemDiagText(), pageid, false, CUSTOM_TOAST, true, true)
+    } catch (e) {
+      logger.error('system diag failed', e)
+      this.notifyResult('Errore diagnostica sistema', pageid, true, CUSTOM_TOAST, true, true)
+    }
+  },
+
   // Full-screen descriptive message for the error/empty states. For the
   // "no config at all" case it also offers a button to load the example config.
   renderMessage(vm, text, offerLoad) {
@@ -151,6 +284,68 @@ export const layout = {
     let currentLayoutIds = null;
     let data = JSON.parse(vm.state.data)
 
+    // Indice zero-based della pagina Memoria; getSwiperIndex() invece conta da 1.
+    vm.storagePageIndex = data.pages.length
+
+    // Pagina locale dell'orologio: non modifica la configurazione CAMERA sul telefono.
+    data.pages.push({
+      title: '💾 Memoria',
+      back_color: COLOR_BLACK,
+      text_color: COLOR_WHITE,
+      rows: [
+        {
+          h: 100,
+          buttons: [
+            {
+              text: '💾 LEGGI MEMORIA',
+              w: 100,
+              radius: 18,
+              back_color: COLOR_GRAY,
+              text_color: COLOR_WHITE,
+              local_action: 'storage_info'
+            }
+          ]
+        }
+      ]
+    })
+
+    // Terza pagina locale: diagnostica dello smartwatch.
+    vm.systemPageIndex = data.pages.length
+    data.pages.push({
+      title: '🧰 Diagnostica',
+      title_height: 90,
+      back_color: COLOR_BLACK,
+      text_color: COLOR_WHITE,
+      rows: [
+        {
+          h: 50,
+          buttons: [
+            {
+              text: '🧠 RAM',
+              w: 100,
+              radius: 18,
+              back_color: COLOR_GRAY,
+              text_color: COLOR_WHITE,
+              local_action: 'ram_info'
+            }
+          ]
+        },
+        {
+          h: 50,
+          buttons: [
+            {
+              text: '⚙️ SISTEMA',
+              w: 100,
+              radius: 18,
+              back_color: COLOR_GRAY,
+              text_color: COLOR_WHITE,
+              local_action: 'system_diag'
+            }
+          ]
+        }
+      ]
+    })
+
     setPageBrightTime({ brightTime: 60000 })
 
     setScrollMode({
@@ -179,7 +374,7 @@ export const layout = {
       })
 
       if (page.title) {
-        titleHeight = 50;
+        titleHeight = page.title_height || 50;
         let pageTitle = createWidget(widget.TEXT, {
           x: 0,
           y: px(offsetYpage),
@@ -271,6 +466,22 @@ export const layout = {
               normal_color: button.back_color || COLOR_GRAY,
               press_color: btnPressColor(button.back_color || COLOR_GRAY, 1.3),
               click_func: () => {
+                // Azioni locali dell'orologio: non passano dal telefono né dal flusso HTTP.
+                if (button.local_action === 'storage_info') {
+                  layout.showStorageInfo(pi)
+                  return
+                }
+
+                if (button.local_action === 'ram_info') {
+                  layout.showRamInfo(pi)
+                  return
+                }
+
+                if (button.local_action === 'system_diag') {
+                  layout.showSystemDiag(pi)
+                  return
+                }
+
                 const spinnerX = startXforThisBtn + (widthOfTheButton - SPINNER_SIZE) / 2
                 const spinnerY = startYforThisBtn + (heigthofthebutton - SPINNER_SIZE) / 2
                 const runRequest = (text) => {
@@ -441,6 +652,12 @@ export const layout = {
               }
             });
 
+            // Salva la geometria reale del pulsante Memoria per centrare il risultato.
+            if (button.local_action === 'storage_info') {
+              layout.refs.storageButtonTop = startYforThisBtn - offsetYpage
+              layout.refs.storageButtonHeight = heigthofthebutton
+            }
+
             if (button.request && typeof button.request.url === 'string' &&
                 button.request.url.indexOf('/mode/toggle') !== -1) {
               vm.modeButton = btn
@@ -482,7 +699,9 @@ export const layout = {
     })
 
     this.refs.customToast.addEventListener(event.CLICK_DOWN, () => {
-      this.refs.customToast.setProperty(prop.VISIBLE, false);
+      if (this.refs.customToastDismissOnTouch !== false) {
+        this.refs.customToast.setProperty(prop.VISIBLE, false);
+      }
     })
 
     this.refs.customToast.setProperty(prop.VISIBLE, false);
@@ -541,12 +760,13 @@ export const layout = {
     this.refs.imageViewImg = img;
     // Tap disabilitato: usare SELECT per tenere o BACK per scartare
   },
-  notifyResult(txt, pageid, isError, type) {
+  notifyResult(txt, pageid, isError, type, dismissOnTouch = true, centerInContent = false) {
     if (type == SYSTEM_TOAST) {
       showToast({
         content: txt,
       })
     } else if (type == CUSTOM_TOAST) {
+      this.refs.customToastDismissOnTouch = dismissOnTouch
       let { width, height } = getTextLayout(txt, {
         text_size: NOTIFICATION_TEXT_SIZE,
         text_width: px(NOTIFICATION_WIDTH - 20),
@@ -554,8 +774,20 @@ export const layout = {
         rows_max: 7
       })
 
+      const toastHeight = height + 20
+      const localY =
+        centerInContent &&
+        this.refs.storageButtonTop !== undefined &&
+        this.refs.storageButtonHeight !== undefined
+          ? this.refs.storageButtonTop +
+            ((this.refs.storageButtonHeight - toastHeight) / 2) - 18
+          : NOTIFICATION_Y - height + 20
+
       this.refs.customToast.setProperty(prop.MORE, {
-        x: px(NOTIFICATION_X), y: px(NOTIFICATION_Y - height + 20) + (pageid * DEVICE_HEIGHT), w: px(NOTIFICATION_WIDTH), h: height + 20,
+        x: px(NOTIFICATION_X),
+        y: px(localY) + (pageid * DEVICE_HEIGHT),
+        w: px(NOTIFICATION_WIDTH),
+        h: toastHeight,
       });
       this.refs.customToastFillRect.setProperty(prop.MORE, {
         x: 0, y: 0, w: px(NOTIFICATION_WIDTH), h: height + 20,
